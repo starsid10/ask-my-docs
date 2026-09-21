@@ -30,5 +30,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run automated tests
+        env:
+          SUPABASE_URL: "https://example.supabase.co"
+          SUPABASE_KEY: "ci-test-key"
         run: |
           pytest -q
