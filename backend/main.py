@@ -52,6 +52,124 @@ supabase: Client = create_client(
 )
 
 
+# =========================================================
+# DOCUMENT PROCESSING HELPERS
+# =========================================================
+
+MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
+
+
+def delete_document_vectors(document_id):
+    collection = chroma_client.get_collection(
+        name="documents"
+    )
+
+    chroma_data = collection.get(
+        where={
+            "document_id": str(document_id)
+        }
+    )
+
+    ids = chroma_data.get("ids", [])
+
+    if ids:
+        collection.delete(ids=ids)
+
+
+def cleanup_document_chunks_and_vectors(
+    user_supabase,
+    document_id
+):
+    try:
+        user_supabase.table(
+            "document_chunks"
+        ).delete().eq(
+            "document_id",
+            str(document_id)
+        ).execute()
+    except Exception as cleanup_error:
+        print(
+            "CHUNK CLEANUP ERROR:",
+            str(cleanup_error)
+        )
+
+    try:
+        delete_document_vectors(
+            document_id
+        )
+    except Exception as cleanup_error:
+        print(
+            "VECTOR CLEANUP ERROR:",
+            str(cleanup_error)
+        )
+
+
+def process_document_content(
+    user_supabase,
+    user_id,
+    document_id,
+    filename,
+    file_content
+):
+    extracted_text = extract_text(
+        file_content
+    )
+
+    chunks = chunk_text(
+        extracted_text,
+        document_id
+    )
+
+    if not chunks:
+        raise Exception(
+            "No readable text was extracted from the PDF."
+        )
+
+    for chunk in chunks:
+        chunk["filename"] = filename
+        chunk["user_id"] = user_id
+
+    store_chunks(
+        user_supabase,
+        chunks
+    )
+
+    embedded_chunks = create_embeddings(
+        chunks
+    )
+
+    store_count = store_embeddings(
+        chroma_client,
+        "documents",
+        embedded_chunks
+    )
+
+    pages = set()
+
+    for chunk in chunks:
+        if chunk.get("page") is not None:
+            pages.add(
+                chunk.get("page")
+            )
+
+    total_pages = len(pages)
+
+    user_supabase.table(
+        "documents"
+    ).update({
+        "processing_status": "completed",
+        "processing_error": None
+    }).eq(
+        "document_id",
+        str(document_id)
+    ).eq(
+        "user_id",
+        user_id
+    ).execute()
+
+    return total_pages, store_count
+
+
 # ==============
 # MODELS
 # ===============
@@ -137,15 +255,65 @@ async def upload_pdf(
             detail="UNSUPPORTED DOCUMENT TYPE"
         )
 
+    if not file.filename or not file.filename.strip():
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid filename is required."
+        )
+
+    # -----------------------------------------------------
+    # Read file and enforce upload-size limit
+    # -----------------------------------------------------
+
+    file_content = await file.read()
+
+    if not file_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded PDF is empty."
+        )
+
+    if len(file_content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="PDF is too large. Maximum supported size is 25 MB."
+        )
+
+    # -----------------------------------------------------
+    # Prevent duplicate filenames for the same user
+    # -----------------------------------------------------
+
+    duplicate_check = user_supabase.table(
+        "documents"
+    ).select(
+        "document_id, filename, processing_status"
+    ).eq(
+        "user_id",
+        user_id
+    ).eq(
+        "filename",
+        file.filename
+    ).execute()
+
+    if duplicate_check.data:
+        existing = duplicate_check.data[0]
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A document named '{file.filename}' already exists. "
+                f"Use the reprocess endpoint to process it again."
+            )
+        )
+
     document_id = uuid.uuid4()
 
     try:
 
         # -------------------------------------------------
-        # Read file
+        # Create document record
         # -------------------------------------------------
-
-        file_content = await file.read()
 
         storage_path = (
             f"DOC/{document_id}/{file.filename}"
@@ -188,102 +356,16 @@ async def upload_pdf(
         )
 
         # -------------------------------------------------
-        # Extract PDF text
+        # Process document
         # -------------------------------------------------
 
-        extracted_text = extract_text(
+        total_pages, store_count = process_document_content(
+            user_supabase,
+            user_id,
+            document_id,
+            file.filename,
             file_content
         )
-
-        # -------------------------------------------------
-        # Chunk document
-        # -------------------------------------------------
-
-        chunks = chunk_text(
-            extracted_text,
-            document_id
-        )
-
-        if not chunks:
-
-            raise Exception(
-                "No readable text was extracted from the PDF."
-            )
-
-        # -------------------------------------------------
-        # Add metadata
-        # -------------------------------------------------
-
-        for chunk in chunks:
-
-            chunk["filename"] = file.filename
-
-            chunk["user_id"] = user_id
-
-        # -------------------------------------------------
-        # Store chunks in Supabase
-        # -------------------------------------------------
-
-        store_chunks(
-            user_supabase,
-            chunks
-        )
-
-        # -------------------------------------------------
-        # Create embeddings
-        # -------------------------------------------------
-
-        embedded_chunks = create_embeddings(
-            chunks
-        )
-
-        # -------------------------------------------------
-        # Store vectors
-        # -------------------------------------------------
-
-        store_count = store_embeddings(
-            chroma_client,
-            "documents",
-            embedded_chunks
-        )
-
-        # -------------------------------------------------
-        # Determine page count
-        # -------------------------------------------------
-
-        pages = set()
-
-        for chunk in chunks:
-
-            if chunk.get("page") is not None:
-
-                pages.add(
-                    chunk.get("page")
-                )
-
-        total_pages = len(pages)
-
-        # -------------------------------------------------
-        # Mark completed
-        # -------------------------------------------------
-
-        user_supabase.table("documents").update({
-
-            "processing_status": "completed",
-
-            "processing_error": None
-
-        }).eq(
-
-            "document_id",
-            str(document_id)
-
-        ).eq(
-
-            "user_id",
-            user_id
-
-        ).execute()
 
         print(
             f"Document processed: {file.filename}"
@@ -302,6 +384,11 @@ async def upload_pdf(
         print(
             "DOCUMENT PROCESSING ERROR:",
             str(e)
+        )
+
+        cleanup_document_chunks_and_vectors(
+            user_supabase,
+            document_id
         )
 
         try:
@@ -346,6 +433,181 @@ async def upload_pdf(
         "total_pages": total_pages
 
     }
+
+
+# =========================================================
+# REPROCESS DOCUMENT
+# =========================================================
+
+@app.post(
+    "/documents/{document_id}/reprocess"
+)
+async def reprocess_document(
+    document_id: str,
+    credentials=Depends(security_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        check_user = supabase.auth.get_user(token)
+        user_id = check_user.user.id
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication token."
+        )
+
+    options = ClientOptions(
+        headers={
+            "Authorization": f"Bearer {token}"
+        }
+    )
+
+    user_supabase = create_client(
+        SUPABASE_URL,
+        SUPABASE_KEY,
+        options=options
+    )
+
+    document_response = user_supabase.table(
+        "documents"
+    ).select(
+        "document_id, filename, storage_path, processing_status"
+    ).eq(
+        "document_id",
+        document_id
+    ).eq(
+        "user_id",
+        user_id
+    ).execute()
+
+    if not document_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found."
+        )
+
+    document = document_response.data[0]
+
+    # ---------------------------------------------------------
+    # 1. Download and validate the original PDF FIRST.
+    #    Existing chunks/vectors are left untouched if storage
+    #    access fails.
+    # ---------------------------------------------------------
+    try:
+        file_content = user_supabase.storage.from_(
+            "documents"
+        ).download(
+            document["storage_path"]
+        )
+
+        if not file_content:
+            raise Exception(
+                "Stored document is empty or could not be downloaded."
+            )
+
+        if len(file_content) > MAX_UPLOAD_SIZE_BYTES:
+            raise Exception(
+                "Stored document exceeds the 25 MB processing limit."
+            )
+
+    except Exception as e:
+        print(
+            "DOCUMENT STORAGE ERROR:",
+            str(e)
+        )
+
+        try:
+            user_supabase.table(
+                "documents"
+            ).update({
+                "processing_status": "failed",
+                "processing_error": str(e)
+            }).eq(
+                "document_id",
+                document_id
+            ).eq(
+                "user_id",
+                user_id
+            ).execute()
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to download the stored document for reprocessing."
+        )
+
+    # ---------------------------------------------------------
+    # 2. Only after the PDF is safely available, rebuild the
+    #    database chunks and vector index.
+    # ---------------------------------------------------------
+    try:
+        user_supabase.table(
+            "documents"
+        ).update({
+            "processing_status": "processing",
+            "processing_error": None
+        }).eq(
+            "document_id",
+            document_id
+        ).eq(
+            "user_id",
+            user_id
+        ).execute()
+
+        cleanup_document_chunks_and_vectors(
+            user_supabase,
+            document_id
+        )
+
+        total_pages, store_count = process_document_content(
+            user_supabase,
+            user_id,
+            document_id,
+            document["filename"],
+            file_content
+        )
+
+        return {
+            "document_id": document_id,
+            "filename": document["filename"],
+            "processing_status": "completed",
+            "total_pages": total_pages,
+            "chunk_count": store_count
+        }
+
+    except Exception as e:
+        print(
+            "DOCUMENT REPROCESSING ERROR:",
+            str(e)
+        )
+
+        cleanup_document_chunks_and_vectors(
+            user_supabase,
+            document_id
+        )
+
+        try:
+            user_supabase.table(
+                "documents"
+            ).update({
+                "processing_status": "failed",
+                "processing_error": str(e)
+            }).eq(
+                "document_id",
+                document_id
+            ).eq(
+                "user_id",
+                user_id
+            ).execute()
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document reprocessing failed."
+        )
 
 
 # =========================================================
@@ -911,21 +1173,7 @@ def delete_document(
     chroma_data = collection.get(
 
         where={
-
-            "$and": [
-
-                {
-                    "document_id":
-                        document_id
-                },
-
-                {
-                    "user_id":
-                        str(user_id)
-                }
-
-            ]
-
+            "document_id": str(document_id)
         }
 
     )
@@ -971,6 +1219,27 @@ def ask_question(
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired authentication token."
+        )
+
+    if not request.query or not request.query.strip():
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question cannot be empty."
+        )
+
+    if not request.document_id or not request.document_id.strip():
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document ID is required."
+        )
+
+    if not request.conversation_id or not request.conversation_id.strip():
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Conversation ID is required."
         )
 
     options = ClientOptions(
@@ -1092,14 +1361,32 @@ def ask_question(
             "in the provided documents."
         )
 
+        # Save both sides of the conversation even when the
+        # retrieval stage abstains. This preserves the complete
+        # User -> Conversation -> Messages relationship.
+        user_supabase.table(
+            "messages"
+        ).insert({
+            "conversation_id": request.conversation_id,
+            "user_id": user_id,
+            "document_id": request.document_id,
+            "role": "user",
+            "content": request.query
+        }).execute()
+
+        user_supabase.table(
+            "messages"
+        ).insert({
+            "conversation_id": request.conversation_id,
+            "user_id": user_id,
+            "document_id": request.document_id,
+            "role": "assistant",
+            "content": answer
+        }).execute()
+
         return {
-
-            "answer":
-                answer,
-
-            "citations":
-                []
-
+            "answer": answer,
+            "citations": []
         }
 
     # -----------------------------------------------------
