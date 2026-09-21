@@ -4,12 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
-
 
 def generate_answer(query, context):
+
+    client = Groq(
+        api_key=os.getenv("GROQ_API_KEY")
+    )
 
     prompt = f"""
 You are "Ask My Docs", an AI document assistant.
