@@ -1,0 +1,72 @@
+[
+    {
+        "question": "What programming languages and technologies does Sudhanshu know?",
+        "expected_answer": "Python, JavaScript, SQL, HTML5, and CSS3.",
+        "document": "SM cv.pdf",
+        "expected_page": 1,
+        "expected_keywords": [
+            "Python",
+            "JavaScript",
+            "SQL"
+        ]
+    },
+    {
+        "question": "What degree is Sudhanshu pursuing?",
+        "expected_answer": "B.Tech. in Computer Science & Engineering.",
+        "document": "SM cv.pdf",
+        "expected_page": 1,
+        "expected_keywords": [
+            "B.Tech",
+            "Computer Science",
+            "Engineering"
+        ]
+    },
+    {
+        "question": "What is Sudhanshu's AI Document Assistant project about?",
+        "expected_answer": "An AI Document Assistant using Retrieval-Augmented Generation.",
+        "document": "SM cv.pdf",
+        "expected_page": 1,
+        "expected_keywords": [
+            "AI Document Assistant",
+            "Retrieval-Augmented Generation"
+        ]
+    },
+    {
+        "question": "What technologies are used in the AI Document Assistant project?",
+        "expected_answer": "React, FastAPI, Supabase, PostgreSQL, semantic search, prompt engineering, and LLM integration.",
+        "document": "SM cv.pdf",
+        "expected_page": 1,
+        "expected_keywords": [
+            "React",
+            "FastAPI",
+            "Supabase",
+            "PostgreSQL",
+            "Semantic Search",
+            "Prompt Engineering",
+            "LLM Integration"
+        ]
+    },
+    {
+        "question": "What machine learning certification does Sudhanshu have?",
+        "expected_answer": "AWS Machine Learning Foundations — Udacity & AWS.",
+        "document": "SM cv.pdf",
+        "expected_page": 1,
+        "expected_keywords": [
+            "AWS Machine Learning Foundations",
+            "Udacity",
+            "AWS"
+        ]
+    },
+    {
+        "question": "What is Sudhanshu's passport number?",
+        "expected_answer": "I don't have enough information in the provided document.",
+        "document": "SM cv.pdf",
+        "expected_page": null
+    },
+    {
+        "question": "What is Sudhanshu's date of birth?",
+        "expected_answer": "I don't have enough information in the provided document.",
+        "document": "SM cv.pdf",
+        "expected_page": null
+    }
+]
