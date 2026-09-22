@@ -35,7 +35,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "https://ask-my-docs-xi.vercel.app",
+        "https://refactored-couscous-4jvpw7x6v44jh7g9g-5173.app.github.dev"
     ],
     allow_credentials=True,
     allow_methods=["*"],

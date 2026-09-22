@@ -31,6 +31,23 @@ import {
 import "./App.css";
 
 
+function getInitials(email) {
+  const localPart = (email || "").split("@")[0].trim();
+
+  if (!localPart) {
+    return "U";
+  }
+
+  const parts = localPart.split(/[._\-\s]+/).filter(Boolean);
+
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  const cleaned = localPart.replace(/[^A-Za-z0-9]/g, "");
+  return cleaned.slice(0, 2).toUpperCase();
+}
+
 function App() {
   /* =====================================================
      AUTHENTICATION STATE
@@ -42,7 +59,7 @@ function App() {
 
   const [mode, setMode] = useState("login");
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => localStorage.getItem("user_email") || "");
   const [password, setPassword] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
@@ -622,6 +639,8 @@ function App() {
           );
         }
 
+  localStorage.setItem("user_email", email);
+
 
         /*
           Update React state.
@@ -631,7 +650,7 @@ function App() {
 
         setToken(data.access_token);
 
-        setEmail("");
+        setEmail(email);
         setPassword("");
 
       }
@@ -689,6 +708,8 @@ function App() {
     localStorage.removeItem(
       "user_id"
     );
+
+  localStorage.removeItem("user_email");
 
     setToken(null);
 
@@ -1949,7 +1970,7 @@ function App() {
 
 
             <div className="avatar">
-              SM
+              {getInitials(email)}
             </div>
 
           </div>

@@ -2542,3 +2542,35 @@ button {
     min-height: 175px !important;
   }
 }
+/* Final compact desktop UI */
+@media (min-width: 1101px) {
+  body {
+    zoom: 0.85;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    min-height: 72px;
+    padding: 0 24px;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .topbar .avatar {
+    margin-left: 0;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+  }
+}
