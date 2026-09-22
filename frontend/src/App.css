@@ -2542,35 +2542,105 @@ button {
     min-height: 175px !important;
   }
 }
-/* Final compact desktop UI */
+
+/* FINAL DESKTOP LAYOUT FIX */
 @media (min-width: 1101px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+  }
+
   body {
-    zoom: 0.85;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    flex: 0 0 300px;
+    width: 300px;
+    min-width: 300px;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+
+  .workspace {
+    flex: 1 1 0;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0;
+    height: 100vh;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .topbar {
-    display: flex;
-    align-items: center;
-    min-height: 72px;
-    padding: 0 24px;
+    height: 76px;
+    min-height: 76px;
+    padding: 0 28px;
   }
 
   .topbar-actions {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
     gap: 12px;
   }
 
-  .topbar .avatar {
-    margin-left: 0;
-    flex: 0 0 44px;
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
+  .search-box {
+    width: 240px;
+    height: 40px;
+  }
+
+  .avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .chat-area {
+    padding: 22px 36px 20px;
+  }
+
+  .selected-document {
+    max-width: 1000px;
+    min-height: 72px;
+    padding: 13px 17px;
+    gap: 13px;
+  }
+
+  .document-large-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .messages {
+    max-width: 1000px;
+  }
+
+  .composer {
+    max-width: 1000px;
+    min-height: 140px;
+    margin-top: 14px;
+    padding: 17px;
+  }
+
+  .composer textarea {
+    height: 78px;
+    width: calc(100% - 58px);
+    font-size: 13px;
+  }
+
+  .send-button {
+    width: 42px;
+    height: 42px;
+    right: 16px;
+    bottom: 38px;
+  }
+
+  .empty-state h3 {
+    font-size: 21px;
+  }
+
+  .question-hint {
+    font-size: 13px;
   }
 }
