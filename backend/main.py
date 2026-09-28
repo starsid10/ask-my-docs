@@ -25,6 +25,11 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+AUTH_REDIRECT_URL = os.getenv(
+    "AUTH_REDIRECT_URL",
+    "https://ask-my-docs-xi.vercel.app"
+)
+
 
 
 # APP
@@ -184,6 +189,10 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
 
 
 class AskRequest(BaseModel):
@@ -1015,6 +1024,39 @@ def add_user(
         "email_confirmation_required":
             email_confirmation_required
 
+    }
+
+
+# =========================================================
+# FORGOT PASSWORD
+# =========================================================
+
+@app.post("/forgot-password")
+def forgot_password(
+    request: ForgotPasswordRequest
+):
+    try:
+        reset_redirect_url = (
+            AUTH_REDIRECT_URL
+            + ("&" if "?" in AUTH_REDIRECT_URL else "?")
+            + "reset=1"
+        )
+
+        supabase.auth.reset_password_for_email(
+            request.email,
+            {
+                "redirect_to": reset_redirect_url
+            }
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send the password reset email."
+        )
+
+    return {
+        "message":
+            "If an account exists for this email, a password reset link has been sent."
     }
 
 
