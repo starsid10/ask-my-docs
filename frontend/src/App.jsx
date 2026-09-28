@@ -660,7 +660,7 @@ function App() {
 
       else {
 
-        await signup(
+        const data = await signup(
           email,
           password
         );
@@ -672,7 +672,9 @@ function App() {
         setError("");
 
         alert(
-          "Signup successful. Please log in."
+          data?.email_confirmation_required
+            ? data.message
+            : "Signup successful. Please log in."
         );
       }
 

@@ -996,13 +996,24 @@ def add_user(
         else None
     )
 
+    email_confirmation_required = (
+        signup_result.session is None
+    )
+
     return {
 
         "message":
-            "Signup successful",
+            (
+                "Signup successful. Please check your email to verify your account."
+                if email_confirmation_required
+                else "Signup successful"
+            ),
 
         "user_id":
-            user_id
+            user_id,
+
+        "email_confirmation_required":
+            email_confirmation_required
 
     }
 
