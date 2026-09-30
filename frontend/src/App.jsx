@@ -73,33 +73,10 @@ function App() {
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
 
   /* =====================================================
-     PASSWORD RECOVERY
+     PASSWORD RECOVERY + GOOGLE AUTH
   ===================================================== */
 
   useEffect(() => {
-
-    const enterResetMode = () => {
-      setMode("reset");
-      setError("");
-      setPassword("");
-    };
-
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-
-        if (
-          event === "PASSWORD_RECOVERY" &&
-          session
-        ) {
-          enterResetMode();
-        }
-
-      }
-    );
-
 
     const resetRequested =
       new URLSearchParams(
@@ -110,19 +87,174 @@ function App() {
       );
 
 
-    if (resetRequested) {
+    const enterResetMode = () => {
+      setMode("reset");
+      setError("");
+      setPassword("");
+    };
 
-      supabase.auth.getSession().then(
-        ({ data }) => {
+
+    const applyGoogleSession = (session) => {
+
+      if (!session || resetRequested) {
+        return;
+      }
+
+      const accessToken = session.access_token;
+      const userId = session.user?.id;
+      const userEmail = session.user?.email || "";
+
+      if (!accessToken) {
+        return;
+      }
+
+      localStorage.setItem(
+        "access_token",
+        accessToken
+      );
+
+      if (userId) {
+        localStorage.setItem(
+          "user_id",
+          userId
+        );
+      }
+
+      localStorage.setItem(
+        "user_email",
+        userEmail
+      );
+
+      setToken(accessToken);
+      setEmail(userEmail);
+      setPassword("");
+      setError("");
+    };
+
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+
+        /* ================= PASSWORD RECOVERY ================= */
+
+        if (
+          event === "PASSWORD_RECOVERY" &&
+          session
+        ) {
+          enterResetMode();
+          return;
+        }
+
+
+        /* ================= GOOGLE SIGN-IN ================= */
+
+        if (
+          (event === "SIGNED_IN" ||
+            event === "INITIAL_SESSION") &&
+          session &&
+          !resetRequested
+        ) {
+
+          applyGoogleSession(session);
+        }
+
+      }
+    );
+
+
+    /* ================= INITIAL SESSION CHECK ================= */
+
+    const initializeAuthSession = async () => {
+
+      try {
+
+        const params =
+          new URLSearchParams(
+            window.location.search
+          );
+
+        const authCode =
+          params.get("code");
+
+
+        /*
+          OAuth uses PKCE and may return an authorization
+          code. Explicitly exchange it for a session.
+        */
+
+        if (authCode && !resetRequested) {
+
+          const {
+            data,
+            error
+          } =
+            await supabase.auth.exchangeCodeForSession(
+              authCode
+            );
+
+          if (error) {
+            throw error;
+          }
+
+          if (data?.session) {
+            applyGoogleSession(data.session);
+          }
+
+
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+
+          return;
+        }
+
+
+        const {
+          data,
+          error
+        } = await supabase.auth.getSession();
+
+        if (error) {
+          throw error;
+        }
+
+
+        if (resetRequested) {
 
           if (data?.session) {
             enterResetMode();
           }
 
+          return;
         }
-      );
 
-    }
+
+        if (data?.session) {
+          applyGoogleSession(data.session);
+        }
+
+      } catch (authError) {
+
+        console.error(
+          "Auth session initialization error:",
+          authError
+        );
+
+        setError(
+          authError.message ||
+          "Unable to restore your authentication session."
+        );
+
+      }
+
+    };
+
+
+    initializeAuthSession();
 
 
     return () => {
@@ -835,6 +967,51 @@ function App() {
       );
 
     } finally {
+
+      setLoading(false);
+    }
+  }
+
+
+  /* =====================================================
+     GOOGLE SIGN-IN
+  ===================================================== */
+
+  async function handleGoogleLogin() {
+
+    setError("");
+    setLoading(true);
+
+    try {
+
+      const {
+        error: googleError
+      } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo:
+            `${window.location.origin}/`,
+          scopes:
+            "https://www.googleapis.com/auth/userinfo.email",
+        },
+      });
+
+
+      if (googleError) {
+        throw googleError;
+      }
+
+    } catch (error) {
+
+      console.error(
+        "Google authentication error:",
+        error
+      );
+
+      setError(
+        error.message ||
+        "Unable to continue with Google."
+      );
 
       setLoading(false);
     }
@@ -1643,6 +1820,60 @@ function App() {
             </button>
 
           </form>
+
+
+          {/* ================= GOOGLE LOGIN ================= */}
+
+          {mode === "login" && (
+
+            <div
+              style={{
+                marginTop: "14px",
+              }}
+            >
+
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(148, 163, 184, 0.35)",
+                  background: "rgba(15, 23, 42, 0.75)",
+                  color: "#e5e7eb",
+                  cursor: loading
+                    ? "not-allowed"
+                    : "pointer",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  opacity: loading ? 0.65 : 1,
+                }}
+              >
+
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontSize: "16px",
+                  }}
+                >
+                  G
+                </span>
+
+                <span>
+                  Continue with Google
+                </span>
+
+              </button>
+
+            </div>
+
+          )}
 
 
           {/* ================= SWITCH ================= */}
