@@ -28,6 +28,8 @@ import {
   askQuestion,
 } from "./api";
 
+import { supabase } from "./supabaseClient";
+
 import "./App.css";
 
 
@@ -66,6 +68,200 @@ function App() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
+
+  /* =====================================================
+     PASSWORD RECOVERY + GOOGLE AUTH
+  ===================================================== */
+
+  useEffect(() => {
+
+    const resetRequested =
+      new URLSearchParams(
+        window.location.search
+      ).get("reset") === "1" ||
+      window.location.hash.includes(
+        "type=recovery"
+      );
+
+
+    const enterResetMode = () => {
+      setMode("reset");
+      setError("");
+      setPassword("");
+    };
+
+
+    const applyGoogleSession = (session) => {
+
+      if (!session || resetRequested) {
+        return;
+      }
+
+      const accessToken = session.access_token;
+      const userId = session.user?.id;
+      const userEmail = session.user?.email || "";
+
+      if (!accessToken) {
+        return;
+      }
+
+      localStorage.setItem(
+        "access_token",
+        accessToken
+      );
+
+      if (userId) {
+        localStorage.setItem(
+          "user_id",
+          userId
+        );
+      }
+
+      localStorage.setItem(
+        "user_email",
+        userEmail
+      );
+
+      setToken(accessToken);
+      setEmail(userEmail);
+      setPassword("");
+      setError("");
+    };
+
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+
+        /* ================= PASSWORD RECOVERY ================= */
+
+        if (
+          event === "PASSWORD_RECOVERY" &&
+          session
+        ) {
+          enterResetMode();
+          return;
+        }
+
+
+        /* ================= GOOGLE SIGN-IN ================= */
+
+        if (
+          (event === "SIGNED_IN" ||
+            event === "INITIAL_SESSION") &&
+          session &&
+          !resetRequested
+        ) {
+
+          applyGoogleSession(session);
+        }
+
+      }
+    );
+
+
+    /* ================= INITIAL SESSION CHECK ================= */
+
+    const initializeAuthSession = async () => {
+
+      try {
+
+        const params =
+          new URLSearchParams(
+            window.location.search
+          );
+
+        const authCode =
+          params.get("code");
+
+
+        /*
+          OAuth uses PKCE and may return an authorization
+          code. Explicitly exchange it for a session.
+        */
+
+        if (authCode && !resetRequested) {
+
+          const {
+            data,
+            error
+          } =
+            await supabase.auth.exchangeCodeForSession(
+              authCode
+            );
+
+          if (error) {
+            throw error;
+          }
+
+          if (data?.session) {
+            applyGoogleSession(data.session);
+          }
+
+
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+
+          return;
+        }
+
+
+        const {
+          data,
+          error
+        } = await supabase.auth.getSession();
+
+        if (error) {
+          throw error;
+        }
+
+
+        if (resetRequested) {
+
+          if (data?.session) {
+            enterResetMode();
+          }
+
+          return;
+        }
+
+
+        if (data?.session) {
+          applyGoogleSession(data.session);
+        }
+
+      } catch (authError) {
+
+        console.error(
+          "Auth session initialization error:",
+          authError
+        );
+
+        setError(
+          authError.message ||
+          "Unable to restore your authentication session."
+        );
+
+      }
+
+    };
+
+
+    initializeAuthSession();
+
+
+    return () => {
+      subscription.unsubscribe();
+    };
+
+  }, []);
 
 
   /* =====================================================
@@ -600,6 +796,86 @@ function App() {
 
     try {
 
+      /* ================= FORGOT PASSWORD ================= */
+
+      if (mode === "forgot") {
+
+        const redirectTo =
+          `${window.location.origin}/?reset=1`;
+
+        const {
+          error: resetError
+        } = await supabase.auth.resetPasswordForEmail(
+          email,
+          {
+            redirectTo,
+          }
+        );
+
+        if (resetError) {
+          throw resetError;
+        }
+
+        setMode("login");
+        setPassword("");
+        setError("");
+
+        alert(
+          "If an account exists for this email, a password reset link has been sent."
+        );
+
+        return;
+      }
+
+
+      /* ================= RESET PASSWORD ================= */
+
+      if (mode === "reset") {
+
+        if (resetPassword.length < 6) {
+          throw new Error(
+            "Password must be at least 6 characters long."
+          );
+        }
+
+        if (resetPassword !== resetPasswordConfirm) {
+          throw new Error(
+            "Passwords do not match."
+          );
+        }
+
+        const { error: updateError } =
+          await supabase.auth.updateUser({
+            password: resetPassword,
+          });
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        await supabase.auth.signOut();
+
+        setMode("login");
+        setPassword("");
+        setResetPassword("");
+        setResetPasswordConfirm("");
+        setError("");
+
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname +
+          window.location.search
+        );
+
+        alert(
+          "Password updated successfully. Please log in with your new password."
+        );
+
+        return;
+      }
+
+
       /* ================= LOGIN ================= */
 
       if (mode === "login") {
@@ -660,7 +936,7 @@ function App() {
 
       else {
 
-        await signup(
+        const data = await signup(
           email,
           password
         );
@@ -672,7 +948,9 @@ function App() {
         setError("");
 
         alert(
-          "Signup successful. Please log in."
+          data?.email_confirmation_required
+            ? data.message
+            : "Signup successful. Please log in."
         );
       }
 
@@ -689,6 +967,51 @@ function App() {
       );
 
     } finally {
+
+      setLoading(false);
+    }
+  }
+
+
+  /* =====================================================
+     GOOGLE SIGN-IN
+  ===================================================== */
+
+  async function handleGoogleLogin() {
+
+    setError("");
+    setLoading(true);
+
+    try {
+
+      const {
+        error: googleError
+      } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo:
+            `${window.location.origin}/`,
+          scopes:
+            "https://www.googleapis.com/auth/userinfo.email",
+        },
+      });
+
+
+      if (googleError) {
+        throw googleError;
+      }
+
+    } catch (error) {
+
+      console.error(
+        "Google authentication error:",
+        error
+      );
+
+      setError(
+        error.message ||
+        "Unable to continue with Google."
+      );
 
       setLoading(false);
     }
@@ -1242,7 +1565,11 @@ function App() {
 
               {mode === "login"
                 ? "Welcome back"
-                : "Create your account"}
+                : mode === "signup"
+                  ? "Create your account"
+                  : mode === "forgot"
+                    ? "Reset your password"
+                    : "Set a new password"}
 
             </h2>
 
@@ -1251,7 +1578,11 @@ function App() {
 
               {mode === "login"
                 ? "Sign in to continue to your documents."
-                : "Create an account to start asking your documents questions."}
+                : mode === "signup"
+                  ? "Create an account to start asking your documents questions."
+                  : mode === "forgot"
+                    ? "Enter your email and we'll send you a reset link."
+                    : "Choose a new password for your account."}
 
             </p>
 
@@ -1266,89 +1597,186 @@ function App() {
 
             {/* EMAIL */}
 
-            <div className="input-group">
+            {mode !== "reset" && (
 
-              <label htmlFor="email">
-                Email
-              </label>
+              <div className="input-group">
 
+                <label htmlFor="email">
+                  Email
+                </label>
 
-              <div className="input-wrapper">
+                <div className="input-wrapper">
 
-                <Mail size={20} />
+                  <Mail size={20} />
 
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(event) =>
+                      setEmail(event.target.value)
+                    }
+                    required
+                  />
 
-                <input
-                  id="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(event) =>
-                    setEmail(
-                      event.target.value
-                    )
-                  }
-                  required
-                />
+                </div>
 
               </div>
 
-            </div>
+            )}
 
 
             {/* PASSWORD */}
 
-            <div className="input-group">
+            {(mode === "login" || mode === "signup") && (
 
-              <label htmlFor="password">
-                Password
-              </label>
+              <div className="input-group">
+
+                <label htmlFor="password">
+                  Password
+                </label>
+
+                <div className="input-wrapper">
+
+                  <Lock size={20} />
+
+                  <input
+                    id="password"
+                    type={
+                      showPassword
+                        ? "text"
+                        : "password"
+                    }
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(event) =>
+                      setPassword(event.target.value)
+                    }
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() =>
+                      setShowPassword(!showPassword)
+                    }
+                  >
+
+                    {showPassword ? (
+                      <EyeOff size={20} />
+                    ) : (
+                      <Eye size={20} />
+                    )}
+
+                  </button>
+
+                </div>
+
+              </div>
+
+            )}
 
 
-              <div className="input-wrapper">
+            {/* FORGOT PASSWORD LINK */}
 
-                <Lock size={20} />
+            {mode === "login" && (
 
-
-                <input
-                  id="password"
-                  type={
-                    showPassword
-                      ? "text"
-                      : "password"
-                  }
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(event) =>
-                    setPassword(
-                      event.target.value
-                    )
-                  }
-                  required
-                />
-
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginTop: "-10px",
+                  marginBottom: "18px",
+                }}
+              >
 
                 <button
                   type="button"
-                  className="password-toggle"
-                  onClick={() =>
-                    setShowPassword(
-                      !showPassword
-                    )
-                  }
+                  onClick={() => {
+                    setMode("forgot");
+                    setError("");
+                    setPassword("");
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#a78bfa",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    padding: 0,
+                  }}
                 >
-
-                  {showPassword ? (
-                    <EyeOff size={20} />
-                  ) : (
-                    <Eye size={20} />
-                  )}
-
+                  Forgot password?
                 </button>
 
               </div>
 
-            </div>
+            )}
+
+
+            {/* RESET PASSWORD */}
+
+            {mode === "reset" && (
+
+              <>
+                <div className="input-group">
+
+                  <label htmlFor="reset-password">
+                    New password
+                  </label>
+
+                  <div className="input-wrapper">
+
+                    <Lock size={20} />
+
+                    <input
+                      id="reset-password"
+                      type="password"
+                      placeholder="Enter new password"
+                      value={resetPassword}
+                      onChange={(event) =>
+                        setResetPassword(event.target.value)
+                      }
+                      minLength={6}
+                      required
+                    />
+
+                  </div>
+
+                </div>
+
+
+                <div className="input-group">
+
+                  <label htmlFor="reset-password-confirm">
+                    Confirm password
+                  </label>
+
+                  <div className="input-wrapper">
+
+                    <Lock size={20} />
+
+                    <input
+                      id="reset-password-confirm"
+                      type="password"
+                      placeholder="Confirm new password"
+                      value={resetPasswordConfirm}
+                      onChange={(event) =>
+                        setResetPasswordConfirm(event.target.value)
+                      }
+                      minLength={6}
+                      required
+                    />
+
+                  </div>
+
+                </div>
+              </>
+
+            )}
 
 
             {/* ERROR */}
@@ -1376,7 +1804,11 @@ function App() {
                   ? "Please wait..."
                   : mode === "login"
                     ? "Login"
-                    : "Create account"}
+                    : mode === "signup"
+                      ? "Create account"
+                      : mode === "forgot"
+                        ? "Send reset link"
+                        : "Update password"}
 
               </span>
 
@@ -1390,53 +1822,136 @@ function App() {
           </form>
 
 
-          {/* ================= SWITCH ================= */}
+          {/* ================= GOOGLE LOGIN ================= */}
 
-          <div className="auth-switch">
+          {mode === "login" && (
 
-            <div className="switch-line"></div>
-
-
-            <div className="switch-content">
-
-              <span>
-
-                {mode === "login"
-                  ? "Don't have an account?"
-                  : "Already have an account?"}
-
-              </span>
-
+            <div
+              style={{
+                marginTop: "14px",
+              }}
+            >
 
               <button
                 type="button"
-                onClick={() => {
-
-                  setMode(
-                    mode === "login"
-                      ? "signup"
-                      : "login"
-                  );
-
-                  setError("");
-
-                  setPassword("");
-
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(148, 163, 184, 0.35)",
+                  background: "rgba(15, 23, 42, 0.75)",
+                  color: "#e5e7eb",
+                  cursor: loading
+                    ? "not-allowed"
+                    : "pointer",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  opacity: loading ? 0.65 : 1,
                 }}
               >
 
-                {mode === "login"
-                  ? "Sign up"
-                  : "Login"}
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontSize: "16px",
+                  }}
+                >
+                  G
+                </span>
+
+                <span>
+                  Continue with Google
+                </span>
 
               </button>
 
             </div>
 
+          )}
 
-            <div className="switch-line"></div>
 
-          </div>
+          {/* ================= SWITCH ================= */}
+
+          {mode === "login" || mode === "signup" ? (
+
+            <div className="auth-switch">
+
+              <div className="switch-line"></div>
+
+              <div className="switch-content">
+
+                <span>
+
+                  {mode === "login"
+                    ? "Don't have an account?"
+                    : "Already have an account?"}
+
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+
+                    setMode(
+                      mode === "login"
+                        ? "signup"
+                        : "login"
+                    );
+
+                    setError("");
+                    setPassword("");
+
+                  }}
+                >
+
+                  {mode === "login"
+                    ? "Sign up"
+                    : "Login"}
+
+                </button>
+
+              </div>
+
+              <div className="switch-line"></div>
+
+            </div>
+
+          ) : (
+
+            <div className="auth-switch">
+
+              <div className="switch-line"></div>
+
+              <div className="switch-content">
+
+                <button
+                  type="button"
+                  onClick={() => {
+
+                    setMode("login");
+                    setError("");
+                    setPassword("");
+                    setResetPassword("");
+                    setResetPasswordConfirm("");
+
+                  }}
+                >
+                  Back to login
+                </button>
+
+              </div>
+
+              <div className="switch-line"></div>
+
+            </div>
+
+          )}
 
         </div>
 
