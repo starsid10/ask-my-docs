@@ -1367,7 +1367,7 @@ def ask_question(
     # -----------------------------------------------------
 
     conversation_check = (
-        supabase
+        user_supabase
         .table("conversations")
         .select(
             "conversation_id, user_id"
