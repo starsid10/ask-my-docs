@@ -178,6 +178,50 @@ function App() {
         const authCode =
           params.get("code");
 
+        const tokenHash =
+          params.get("token_hash");
+
+        const tokenType =
+          params.get("type");
+
+
+        /*
+          Email confirmation links now use TokenHash.
+          Verify the one-time token directly with Supabase.
+        */
+
+        if (
+          tokenHash &&
+          tokenType === "email" &&
+          !resetRequested
+        ) {
+
+          const {
+            data,
+            error
+          } =
+            await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: "email",
+            });
+
+          if (error) {
+            throw error;
+          }
+
+          if (data?.session) {
+            applyGoogleSession(data.session);
+          }
+
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+
+          return;
+        }
+
 
         /*
           OAuth uses PKCE and may return an authorization
